@@ -1,0 +1,396 @@
+{
+  "version": "1.0.0",
+  "diabetes": {
+    "disease": "diabetes",
+    "best_algorithm": "Decision Tree",
+    "features": [
+      "Pregnancies",
+      "Glucose",
+      "BloodPressure",
+      "SkinThickness",
+      "Insulin",
+      "BMI",
+      "DiabetesPedigreeFunction",
+      "Age"
+    ],
+    "metrics": {
+      "accuracy": 0.7597,
+      "precision": 0.6393,
+      "recall": 0.7222,
+      "f1_score": 0.6783,
+      "roc_auc": 0.7622,
+      "cv_accuracy_mean": 0.7296,
+      "confusion_matrix": [
+        [
+          78,
+          22
+        ],
+        [
+          15,
+          39
+        ]
+      ]
+    },
+    "all_models": {
+      "Logistic Regression": {
+        "accuracy": 0.7078,
+        "precision": 0.6,
+        "recall": 0.5,
+        "f1_score": 0.5455,
+        "roc_auc": 0.813,
+        "cv_accuracy_mean": 0.7882,
+        "confusion_matrix": [
+          [
+            82,
+            18
+          ],
+          [
+            27,
+            27
+          ]
+        ]
+      },
+      "Decision Tree": {
+        "accuracy": 0.7597,
+        "precision": 0.6393,
+        "recall": 0.7222,
+        "f1_score": 0.6783,
+        "roc_auc": 0.7622,
+        "cv_accuracy_mean": 0.7296,
+        "confusion_matrix": [
+          [
+            78,
+            22
+          ],
+          [
+            15,
+            39
+          ]
+        ]
+      },
+      "Random Forest": {
+        "accuracy": 0.7403,
+        "precision": 0.6667,
+        "recall": 0.5185,
+        "f1_score": 0.5833,
+        "roc_auc": 0.8167,
+        "cv_accuracy_mean": 0.772,
+        "confusion_matrix": [
+          [
+            86,
+            14
+          ],
+          [
+            26,
+            28
+          ]
+        ]
+      },
+      "Gradient Boosting": {
+        "accuracy": 0.7403,
+        "precision": 0.6458,
+        "recall": 0.5741,
+        "f1_score": 0.6078,
+        "roc_auc": 0.8196,
+        "cv_accuracy_mean": 0.7443,
+        "confusion_matrix": [
+          [
+            83,
+            17
+          ],
+          [
+            23,
+            31
+          ]
+        ]
+      },
+      "Support Vector Machine": {
+        "accuracy": 0.7403,
+        "precision": 0.6522,
+        "recall": 0.5556,
+        "f1_score": 0.6,
+        "roc_auc": 0.7964,
+        "cv_accuracy_mean": 0.7801,
+        "confusion_matrix": [
+          [
+            84,
+            16
+          ],
+          [
+            24,
+            30
+          ]
+        ]
+      }
+    }
+  },
+  "heart": {
+    "disease": "heart",
+    "best_algorithm": "Logistic Regression",
+    "features": [
+      "age",
+      "sex",
+      "cp",
+      "trestbps",
+      "chol",
+      "fbs",
+      "restecg",
+      "thalach",
+      "exang",
+      "oldpeak",
+      "slope",
+      "ca",
+      "thal"
+    ],
+    "metrics": {
+      "accuracy": 0.8689,
+      "precision": 0.8571,
+      "recall": 0.9091,
+      "f1_score": 0.8824,
+      "roc_auc": 0.9102,
+      "cv_accuracy_mean": 0.8182,
+      "confusion_matrix": [
+        [
+          23,
+          5
+        ],
+        [
+          3,
+          30
+        ]
+      ]
+    },
+    "all_models": {
+      "Logistic Regression": {
+        "accuracy": 0.8689,
+        "precision": 0.8571,
+        "recall": 0.9091,
+        "f1_score": 0.8824,
+        "roc_auc": 0.9102,
+        "cv_accuracy_mean": 0.8182,
+        "confusion_matrix": [
+          [
+            23,
+            5
+          ],
+          [
+            3,
+            30
+          ]
+        ]
+      },
+      "Decision Tree": {
+        "accuracy": 0.7377,
+        "precision": 0.7297,
+        "recall": 0.8182,
+        "f1_score": 0.7714,
+        "roc_auc": 0.7738,
+        "cv_accuracy_mean": 0.7395,
+        "confusion_matrix": [
+          [
+            18,
+            10
+          ],
+          [
+            6,
+            27
+          ]
+        ]
+      },
+      "Random Forest": {
+        "accuracy": 0.7869,
+        "precision": 0.75,
+        "recall": 0.9091,
+        "f1_score": 0.8219,
+        "roc_auc": 0.9058,
+        "cv_accuracy_mean": 0.8098,
+        "confusion_matrix": [
+          [
+            18,
+            10
+          ],
+          [
+            3,
+            30
+          ]
+        ]
+      },
+      "Gradient Boosting": {
+        "accuracy": 0.7869,
+        "precision": 0.7632,
+        "recall": 0.8788,
+        "f1_score": 0.8169,
+        "roc_auc": 0.8506,
+        "cv_accuracy_mean": 0.7849,
+        "confusion_matrix": [
+          [
+            19,
+            9
+          ],
+          [
+            4,
+            29
+          ]
+        ]
+      },
+      "Support Vector Machine": {
+        "accuracy": 0.8361,
+        "precision": 0.8108,
+        "recall": 0.9091,
+        "f1_score": 0.8571,
+        "roc_auc": 0.9102,
+        "cv_accuracy_mean": 0.8223,
+        "confusion_matrix": [
+          [
+            21,
+            7
+          ],
+          [
+            3,
+            30
+          ]
+        ]
+      }
+    }
+  },
+  "kidney": {
+    "disease": "kidney",
+    "best_algorithm": "Logistic Regression",
+    "features": [
+      "age",
+      "bp",
+      "sg",
+      "al",
+      "su",
+      "rbc",
+      "pc",
+      "pcc",
+      "ba",
+      "bgr",
+      "bu",
+      "sc",
+      "sod",
+      "pot",
+      "hemo",
+      "pcv",
+      "wc",
+      "rc",
+      "htn",
+      "dm",
+      "cad",
+      "appet",
+      "pe",
+      "ane"
+    ],
+    "metrics": {
+      "accuracy": 0.925,
+      "precision": 0.9444,
+      "recall": 0.7727,
+      "f1_score": 0.85,
+      "roc_auc": 0.9639,
+      "cv_accuracy_mean": 0.9281,
+      "confusion_matrix": [
+        [
+          57,
+          1
+        ],
+        [
+          5,
+          17
+        ]
+      ]
+    },
+    "all_models": {
+      "Logistic Regression": {
+        "accuracy": 0.925,
+        "precision": 0.9444,
+        "recall": 0.7727,
+        "f1_score": 0.85,
+        "roc_auc": 0.9639,
+        "cv_accuracy_mean": 0.9281,
+        "confusion_matrix": [
+          [
+            57,
+            1
+          ],
+          [
+            5,
+            17
+          ]
+        ]
+      },
+      "Decision Tree": {
+        "accuracy": 0.7875,
+        "precision": 0.6471,
+        "recall": 0.5,
+        "f1_score": 0.5641,
+        "roc_auc": 0.5756,
+        "cv_accuracy_mean": 0.8594,
+        "confusion_matrix": [
+          [
+            52,
+            6
+          ],
+          [
+            11,
+            11
+          ]
+        ]
+      },
+      "Random Forest": {
+        "accuracy": 0.8625,
+        "precision": 0.9231,
+        "recall": 0.5455,
+        "f1_score": 0.6857,
+        "roc_auc": 0.96,
+        "cv_accuracy_mean": 0.8812,
+        "confusion_matrix": [
+          [
+            57,
+            1
+          ],
+          [
+            10,
+            12
+          ]
+        ]
+      },
+      "Gradient Boosting": {
+        "accuracy": 0.9125,
+        "precision": 0.8947,
+        "recall": 0.7727,
+        "f1_score": 0.8293,
+        "roc_auc": 0.9451,
+        "cv_accuracy_mean": 0.8875,
+        "confusion_matrix": [
+          [
+            56,
+            2
+          ],
+          [
+            5,
+            17
+          ]
+        ]
+      },
+      "Support Vector Machine": {
+        "accuracy": 0.9,
+        "precision": 0.9375,
+        "recall": 0.6818,
+        "f1_score": 0.7895,
+        "roc_auc": 0.9389,
+        "cv_accuracy_mean": 0.8938,
+        "confusion_matrix": [
+          [
+            57,
+            1
+          ],
+          [
+            7,
+            15
+          ]
+        ]
+      }
+    }
+  }
+}
