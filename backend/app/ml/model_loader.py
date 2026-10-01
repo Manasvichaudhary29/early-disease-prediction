@@ -89,6 +89,6 @@ class ModelRegistry:
             top_n=5
         )
 
-        return proba, category, factors, "1.0.0"
+        return proba, category, factors, "2.0.0"
 
 model_registry = ModelRegistry.get_instance()

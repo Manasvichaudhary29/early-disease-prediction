@@ -86,17 +86,20 @@ def explain_prediction(
             # Linear model coefficients multiplied by normalized feature deviation
             vals = (classifier.coef_[0] * transformed_input[0])
         else:
-            # Fallback perturbation
-            vals = np.zeros(transformed_input.shape[1])
+            # Fallback perturbation based on standardized input deviation
+            vals = transformed_input[0] if transformed_input.ndim == 2 else transformed_input
             
     except Exception:
-        # Fallback to feature importances or coefficients
+        # Fallback to feature importances, coefficients, or input deviation
         if hasattr(classifier, "feature_importances_"):
             vals = classifier.feature_importances_ * transformed_input[0]
         elif hasattr(classifier, "coef_"):
             vals = classifier.coef_[0] * transformed_input[0]
         else:
-            vals = np.ones(min(len(feature_names), transformed_input.shape[1])) * 0.1
+            vals = transformed_input[0] if transformed_input.ndim == 2 else transformed_input
+
+    if np.all(np.abs(vals) < 1e-6):
+        vals = transformed_input[0] if transformed_input.ndim == 2 else transformed_input
 
     # Map values to feature names
     limit = min(len(feature_names), len(vals))
@@ -104,8 +107,16 @@ def explain_prediction(
     for i in range(limit):
         f_name = feature_names[i]
         impact = float(vals[i])
-        raw_val = user_inputs.get(f_name, "N/A")
-        clean_name = CLINICAL_NAMES.get(f_name, f_name.replace("_", " ").title())
+        base_feat = f_name.split("_")[0] if "_" in f_name else f_name
+        if f_name in CLINICAL_NAMES:
+            clean_name = CLINICAL_NAMES[f_name]
+        elif base_feat in CLINICAL_NAMES:
+            category_val = f_name[len(base_feat)+1:].replace(".0", "").title()
+            clean_name = f"{CLINICAL_NAMES[base_feat]} ({category_val})"
+        else:
+            clean_name = f_name.replace("_", " ").title()
+
+        raw_val = user_inputs.get(f_name, user_inputs.get(base_feat, "N/A"))
         
         direction = "increases_risk" if impact > 0 else "decreases_risk"
         scored.append({

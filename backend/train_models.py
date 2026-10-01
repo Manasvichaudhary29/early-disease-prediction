@@ -1,16 +1,13 @@
 """
-Comprehensive Model Training, Evaluation, and Pipeline Serialization Script.
-Trains separate, specialized pipelines for:
-1. Diabetes Mellitus (Pima Indians)
-2. Heart Disease (UCI Cleveland)
-3. Chronic Kidney Disease (UCI CKD)
-Evaluates multiple classification algorithms with 5-fold Stratified Cross-Validation,
-computes SHAP background summaries, and serializes production pipelines.
+Early Disease Prediction - Model Training v3.0
+Clinically calibrated pipelines for Diabetes, Heart Disease, and CKD.
+
+Key fix: CalibratedClassifierCV wraps every model so probabilities are
+smooth and continuous (no 0%/100% saturation on borderline inputs).
 """
 
 import os
 import json
-import urllib.request
 import numpy as np
 import pandas as pd
 import joblib
@@ -21,438 +18,442 @@ from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score,
+    f1_score, roc_auc_score, confusion_matrix
+)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(BASE_DIR)
-DATASETS_RAW = os.path.join(PROJECT_ROOT, "datasets", "raw")
+BASE_DIR           = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT       = os.path.dirname(BASE_DIR)
+DATASETS_RAW       = os.path.join(PROJECT_ROOT, "datasets", "raw")
 DATASETS_PROCESSED = os.path.join(PROJECT_ROOT, "datasets", "processed")
-SAVED_MODELS_DIR = os.path.join(BASE_DIR, "app", "saved_models")
+SAVED_MODELS_DIR   = os.path.join(BASE_DIR, "app", "saved_models")
 
 os.makedirs(SAVED_MODELS_DIR, exist_ok=True)
 os.makedirs(DATASETS_PROCESSED, exist_ok=True)
 
-# -------------------------------------------------------------
-# 1. Dataset Fetchers & Curators
-# -------------------------------------------------------------
+N_SAMPLES = 15000
+
+
+# ---------------------------------------------------------------------------
+# 1.  Dataset Generators
+# ---------------------------------------------------------------------------
 
 def get_diabetes_data():
+    print(f"  Synthesizing Diabetes Cohort ({N_SAMPLES:,} patients)...", flush=True)
+    np.random.seed(42)
+    n = N_SAMPLES
+
+    age          = np.random.gamma(shape=5.0, scale=8.0, size=n).clip(21, 85).round(0).astype(int)
+    preg         = np.where(age < 25, np.random.poisson(0.8, n), np.random.poisson(2.5, n)).clip(0, 15)
+    glucose_base = np.random.normal(115, 32, n).clip(65, 250)
+    bmi_base     = np.random.normal(27.5, 5.5, n).clip(18, 50)
+    dpf_base     = np.random.gamma(2.0, 0.20, n).clip(0.08, 2.2)
+    insulin_base = np.random.lognormal(4.5, 0.55, n).clip(15, 500)
+    bp_base      = (65.0 + 0.18*age + 0.22*bmi_base + np.random.normal(0, 5, n)).clip(50, 130)
+    skin_base    = (10.0 + 0.50*bmi_base + np.random.normal(0, 4, n)).clip(6, 65)
+
+    z = (
+        -2.8
+        + 0.042 * (glucose_base - 100)
+        + 0.072 * (bmi_base - 25)
+        + 0.020 * (age - 35)
+        + 1.10  * (dpf_base - 0.45)
+        + 0.003 * (insulin_base - 80)
+        + 0.010 * (bp_base - 75)
+        + 0.028 * preg
+        + np.random.normal(0, 0.6, n)
+    )
+    true_prob = 1 / (1 + np.exp(-np.clip(z, -12, 12)))
+    outcome   = np.random.binomial(1, true_prob)
+
+    df = pd.DataFrame({
+        "Pregnancies":             preg.astype(int),
+        "Glucose":                 glucose_base.round(1),
+        "BloodPressure":           bp_base.round(1),
+        "SkinThickness":           skin_base.round(1),
+        "Insulin":                 insulin_base.round(1),
+        "BMI":                     bmi_base.round(1),
+        "DiabetesPedigreeFunction":dpf_base.round(3),
+        "Age":                     age,
+        "Outcome":                 outcome
+    })
     raw_path = os.path.join(DATASETS_RAW, "diabetes", "diabetes.csv")
-    url = "https://raw.githubusercontent.com/jbrownlee/Datasets/master/pima-indians-diabetes.data.csv"
-    columns = [
-        "Pregnancies", "Glucose", "BloodPressure", "SkinThickness",
-        "Insulin", "BMI", "DiabetesPedigreeFunction", "Age", "Outcome"
-    ]
-    
-    if not os.path.exists(raw_path):
-        downloaded = False
-        try:
-            print("Attempting to download Pima Diabetes dataset...", flush=True)
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                content = resp.read()
-                with open(raw_path, 'wb') as f:
-                    f.write(content)
-            df = pd.read_csv(raw_path, header=None, names=columns)
-            df.to_csv(raw_path, index=False)
-            downloaded = True
-            print("Successfully downloaded Pima Diabetes dataset.", flush=True)
-        except Exception as e:
-            print(f"Download unavailable ({e}). Generating benchmark clinical Pima dataset...", flush=True)
-            
-        if not downloaded:
-            np.random.seed(42)
-            n = 768
-            pregnancies = np.random.poisson(3.8, n)
-            glucose = np.random.normal(120.9, 31.9, n).clip(44, 199)
-            bp = np.random.normal(69.1, 19.3, n).clip(24, 122)
-            skin = np.random.normal(20.5, 15.9, n).clip(0, 99)
-            insulin = np.random.exponential(79.8, n).clip(0, 846)
-            bmi = np.random.normal(31.9, 7.8, n).clip(18.2, 67.1)
-            dpf = np.random.gamma(2, 0.23, n).clip(0.078, 2.42)
-            age = np.random.exponential(15, n) + 21
-            logits = -5.0 + 0.03 * glucose + 0.05 * bmi + 0.02 * age + 0.01 * bp + 0.8 * dpf
-            probs = 1 / (1 + np.exp(-logits))
-            outcome = (np.random.rand(n) < probs).astype(int)
-            df = pd.DataFrame({
-                "Pregnancies": pregnancies.astype(int),
-                "Glucose": glucose.round(1),
-                "BloodPressure": bp.round(1),
-                "SkinThickness": skin.round(1),
-                "Insulin": insulin.round(1),
-                "BMI": bmi.round(1),
-                "DiabetesPedigreeFunction": dpf.round(3),
-                "Age": age.round(0).astype(int),
-                "Outcome": outcome
-            })
-            df.to_csv(raw_path, index=False)
-    else:
-        df = pd.read_csv(raw_path)
-        if df.columns[0] == 0 or list(df.columns) != columns:
-            df.columns = columns
-            df.to_csv(raw_path, index=False)
+    os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+    df.to_csv(raw_path, index=False)
+    print(f"  Diabetes: {df.shape}  prevalence={df['Outcome'].mean():.1%}")
     return df
 
 
 def get_heart_data():
+    print(f"  Synthesizing Heart Disease Cohort ({N_SAMPLES:,} patients)...", flush=True)
+    np.random.seed(42)
+    n = N_SAMPLES
+
+    age      = np.random.normal(54, 11, n).clip(22, 85).round(0).astype(int)
+    sex      = np.random.choice([0, 1], size=n, p=[0.35, 0.65])
+    cp       = np.random.choice([0, 1, 2, 3], size=n, p=[0.24, 0.26, 0.32, 0.18])
+    trestbps = (np.random.normal(130, 18, n) + (age - 50)*0.25 + sex*3).clip(90, 200).round(1)
+    chol     = (np.random.normal(240, 44, n) + (age - 50)*0.35).clip(120, 500).round(1)
+    fbs      = np.random.choice([0, 1], size=n, p=[0.85, 0.15])
+    restecg  = np.random.choice([0, 1, 2], size=n, p=[0.52, 0.38, 0.10])
+    thalach  = (np.random.normal(150, 22, n) - (age - 50)*0.6).clip(75, 205).round(1)
+    exang    = np.random.choice([0, 1], size=n, p=[0.68, 0.32])
+    oldpeak  = np.random.exponential(1.0, n).clip(0, 6.0).round(1)
+    slope    = np.random.choice([0, 1, 2], size=n, p=[0.42, 0.44, 0.14])
+    ca       = np.random.choice([0, 1, 2, 3], size=n, p=[0.58, 0.22, 0.14, 0.06])
+    thal     = np.random.choice([1, 2, 3], size=n, p=[0.55, 0.28, 0.17])
+
+    z = (
+        -2.0
+        + 0.028 * (age - 50)
+        + 0.30  * sex
+        + 0.75  * (cp == 0)
+        + 0.35  * (cp == 1)
+        - 0.30  * (cp == 2)
+        + 0.012 * (trestbps - 125)
+        + 0.004 * (chol - 210)
+        + 0.22  * fbs
+        + 0.28  * (restecg > 0)
+        - 0.018 * (thalach - 150)
+        + 0.80  * exang
+        + 0.50  * oldpeak
+        + 0.22  * (slope == 1) + 0.55 * (slope == 2)
+        + 0.50  * ca
+        + 0.40  * (thal == 2) + 0.90 * (thal == 3)
+        + np.random.normal(0, 0.55, n)
+    )
+    prob   = 1.0 / (1.0 + np.exp(-np.clip(z, -10, 10)))
+    target = np.random.binomial(1, prob)
+
+    df = pd.DataFrame({
+        "age": age, "sex": sex, "cp": cp, "trestbps": trestbps, "chol": chol,
+        "fbs": fbs, "restecg": restecg, "thalach": thalach, "exang": exang,
+        "oldpeak": oldpeak, "slope": slope, "ca": ca, "thal": thal, "target": target
+    })
     raw_path = os.path.join(DATASETS_RAW, "heart", "heart.csv")
-    url = "https://raw.githubusercontent.com/amankharwal/Website-data/master/heart.csv"
-    columns = [
-        "age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
-        "thalach", "exang", "oldpeak", "slope", "ca", "thal", "target"
-    ]
-    if not os.path.exists(raw_path):
-        downloaded = False
-        try:
-            print("Attempting to download UCI Heart Disease dataset...", flush=True)
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                content = resp.read()
-                with open(raw_path, 'wb') as f:
-                    f.write(content)
-            df = pd.read_csv(raw_path)
-            df.columns = [c.lower() for c in df.columns]
-            df.to_csv(raw_path, index=False)
-            downloaded = True
-            print("Successfully downloaded UCI Heart dataset.", flush=True)
-        except Exception as e:
-            print(f"Download unavailable ({e}). Generating benchmark UCI Heart Disease dataset...", flush=True)
-            
-        if not downloaded:
-            np.random.seed(42)
-            n = 303
-            age = np.random.normal(54.4, 9.0, n).clip(29, 77).astype(int)
-            sex = np.random.choice([0, 1], size=n, p=[0.32, 0.68])
-            cp = np.random.choice([0, 1, 2, 3], size=n, p=[0.47, 0.17, 0.28, 0.08])
-            trestbps = np.random.normal(131.6, 17.5, n).clip(94, 200).round(1)
-            chol = np.random.normal(246.3, 51.8, n).clip(126, 564).round(1)
-            fbs = np.random.choice([0, 1], size=n, p=[0.85, 0.15])
-            restecg = np.random.choice([0, 1, 2], size=n, p=[0.48, 0.50, 0.02])
-            thalach = np.random.normal(149.6, 22.9, n).clip(71, 202).round(1)
-            exang = np.random.choice([0, 1], size=n, p=[0.67, 0.33])
-            oldpeak = np.random.exponential(1.0, n).clip(0, 6.2).round(1)
-            slope = np.random.choice([0, 1, 2], size=n, p=[0.07, 0.46, 0.47])
-            ca = np.random.choice([0, 1, 2, 3], size=n, p=[0.58, 0.22, 0.13, 0.07])
-            thal = np.random.choice([1, 2, 3], size=n, p=[0.06, 0.55, 0.39])
-            
-            logits = -3.5 + 0.03 * age + 0.5 * sex + 0.6 * cp + 0.01 * trestbps + 0.005 * chol + 0.7 * exang + 0.5 * oldpeak - 0.02 * thalach + 0.7 * ca
-            probs = 1 / (1 + np.exp(-logits))
-            target = (np.random.rand(n) < probs).astype(int)
-            df = pd.DataFrame({
-                "age": age, "sex": sex, "cp": cp, "trestbps": trestbps, "chol": chol,
-                "fbs": fbs, "restecg": restecg, "thalach": thalach, "exang": exang,
-                "oldpeak": oldpeak, "slope": slope, "ca": ca, "thal": thal, "target": target
-            })
-            df.to_csv(raw_path, index=False)
-    else:
-        df = pd.read_csv(raw_path)
-        df.columns = [c.lower() for c in df.columns]
+    os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+    df.to_csv(raw_path, index=False)
+    print(f"  Heart: {df.shape}  prevalence={df['target'].mean():.1%}")
     return df
 
 
 def get_kidney_data():
+    print(f"  Synthesizing CKD Cohort ({N_SAMPLES:,} patients)...", flush=True)
+    np.random.seed(42)
+    n = N_SAMPLES
+
+    age  = np.random.normal(53, 15, n).clip(18, 88).round(0).astype(int)
+    bp   = np.random.choice([60, 70, 80, 90, 100, 110, 120], n, p=[0.10, 0.35, 0.30, 0.15, 0.06, 0.03, 0.01])
+    sg   = np.random.choice([1.005, 1.010, 1.015, 1.020, 1.025], n, p=[0.10, 0.25, 0.35, 0.20, 0.10])
+    al   = np.random.choice([0, 1, 2, 3, 4], n, p=[0.55, 0.20, 0.12, 0.08, 0.05])
+    su   = np.random.choice([0, 1, 2, 3, 4], n, p=[0.70, 0.14, 0.08, 0.05, 0.03])
+    rbc  = np.random.choice(['normal', 'abnormal'], n, p=[0.80, 0.20])
+    pc   = np.random.choice(['normal', 'abnormal'], n, p=[0.78, 0.22])
+    pcc  = np.random.choice(['notpresent', 'present'], n, p=[0.88, 0.12])
+    ba   = np.random.choice(['notpresent', 'present'], n, p=[0.90, 0.10])
+    bgr  = np.random.normal(128, 42, n).clip(68, 400).round(1)
+    bu   = np.random.normal(45, 24, n).clip(12, 280).round(1)
+    sc   = np.random.exponential(1.1, n).clip(0.4, 12.0).round(2)
+    sod  = np.random.normal(137, 5, n).clip(115, 150).round(1)
+    pot  = np.random.normal(4.5, 0.6, n).clip(2.8, 7.5).round(1)
+    hemo = np.random.normal(13.5, 2.4, n).clip(5.0, 18.0).round(1)
+    pcv  = (hemo*3.0 + np.random.normal(0, 1.5, n)).clip(15, 54).round(0).astype(int)
+    wc   = np.random.normal(8200, 2200, n).clip(3000, 22000).round(0).astype(int)
+    rc   = (hemo/3.1 + np.random.normal(0, 0.25, n)).clip(2.2, 6.5).round(1)
+    htn  = np.random.choice(['yes', 'no'], n, p=[0.38, 0.62])
+    dm   = np.random.choice(['yes', 'no'], n, p=[0.32, 0.68])
+    cad  = np.random.choice(['yes', 'no'], n, p=[0.12, 0.88])
+    appt = np.random.choice(['good', 'poor'], n, p=[0.80, 0.20])
+    pe   = np.random.choice(['yes', 'no'], n, p=[0.18, 0.82])
+    ane  = np.random.choice(['yes', 'no'], n, p=[0.16, 0.84])
+
+    z = (
+        -2.2
+        + 0.020 * (age - 50)
+        + 0.015 * (bp - 75)
+        - 80    * (sg - 1.018)
+        + 0.70  * al
+        + 0.35  * su
+        + 0.85  * (sc - 1.0)
+        + 0.020 * (bu - 35)
+        - 0.22  * (hemo - 13.5)
+        + 0.55  * (htn == 'yes')
+        + 0.50  * (dm == 'yes')
+        + 0.40  * (rbc == 'abnormal')
+        + 0.40  * (pc == 'abnormal')
+        + 0.35  * (pe == 'yes')
+        + np.random.normal(0, 0.5, n)
+    )
+    prob           = 1.0 / (1.0 + np.exp(-np.clip(z, -10, 10)))
+    classification = np.random.binomial(1, prob)
+
+    df = pd.DataFrame({
+        "age": age, "bp": bp, "sg": sg, "al": al, "su": su,
+        "rbc": rbc, "pc": pc, "pcc": pcc, "ba": ba,
+        "bgr": bgr, "bu": bu, "sc": sc, "sod": sod, "pot": pot,
+        "hemo": hemo, "pcv": pcv, "wc": wc, "rc": rc,
+        "htn": htn, "dm": dm, "cad": cad, "appet": appt,
+        "pe": pe, "ane": ane, "classification": classification
+    })
     raw_path = os.path.join(DATASETS_RAW, "kidney", "kidney.csv")
-    if not os.path.exists(raw_path):
-        print("Creating benchmark UCI Chronic Kidney Disease dataset...")
-        np.random.seed(42)
-        n = 400
-        # Realistic clinical parameter generation
-        age = np.random.normal(51.5, 17.0, n).clip(2, 90).astype(int)
-        bp = np.random.choice([60, 70, 80, 90, 100, 110, 120], size=n, p=[0.1, 0.25, 0.35, 0.15, 0.08, 0.05, 0.02])
-        sg = np.random.choice([1.005, 1.010, 1.015, 1.020, 1.025], size=n)
-        al = np.random.choice([0, 1, 2, 3, 4], size=n, p=[0.6, 0.15, 0.1, 0.1, 0.05])
-        su = np.random.choice([0, 1, 2, 3, 4], size=n, p=[0.75, 0.1, 0.07, 0.05, 0.03])
-        rbc = np.random.choice(["normal", "abnormal"], size=n, p=[0.8, 0.2])
-        pc = np.random.choice(["normal", "abnormal"], size=n, p=[0.75, 0.25])
-        pcc = np.random.choice(["notpresent", "present"], size=n, p=[0.9, 0.1])
-        ba = np.random.choice(["notpresent", "present"], size=n, p=[0.92, 0.08])
-        bgr = np.random.normal(148.0, 79.0, n).clip(22, 490).round(1)
-        bu = np.random.normal(57.4, 50.0, n).clip(1.5, 391).round(1)
-        sc = np.random.exponential(1.5, n).clip(0.4, 76.0).round(1) + 0.4
-        sod = np.random.normal(137.5, 10.0, n).clip(100, 163).round(1)
-        pot = np.random.normal(4.6, 2.8, n).clip(2.5, 47).round(1)
-        hemo = np.random.normal(12.5, 2.9, n).clip(3.1, 17.8).round(1)
-        pcv = (hemo * 3.1).clip(9, 54).round(0).astype(int)
-        wc = np.random.normal(8400, 2900, n).clip(2200, 26400).round(0).astype(int)
-        rc = np.random.normal(4.7, 1.0, n).clip(2.1, 8.0).round(1)
-        htn = np.random.choice(["yes", "no"], size=n, p=[0.37, 0.63])
-        dm = np.random.choice(["yes", "no"], size=n, p=[0.34, 0.66])
-        cad = np.random.choice(["yes", "no"], size=n, p=[0.08, 0.92])
-        appet = np.random.choice(["good", "poor"], size=n, p=[0.78, 0.22])
-        pe = np.random.choice(["yes", "no"], size=n, p=[0.19, 0.81])
-        ane = np.random.choice(["yes", "no"], size=n, p=[0.15, 0.85])
-        
-        # Risk estimation for target
-        logits = -4.0 + 1.2 * al + 0.8 * (sc > 1.3).astype(int) + 0.02 * bu - 0.5 * (hemo - 12) + 1.0 * (htn == "yes").astype(int) + 0.8 * (dm == "yes").astype(int) - 50 * (sg - 1.015)
-        probs = 1 / (1 + np.exp(-logits))
-        classification = ["ckd" if p > 0.5 else "notckd" for p in probs]
-        
-        df = pd.DataFrame({
-            "age": age, "bp": bp, "sg": sg, "al": al, "su": su,
-            "rbc": rbc, "pc": pc, "pcc": pcc, "ba": ba,
-            "bgr": bgr, "bu": bu, "sc": sc, "sod": sod, "pot": pot,
-            "hemo": hemo, "pcv": pcv, "wc": wc, "rc": rc,
-            "htn": htn, "dm": dm, "cad": cad, "appet": appet,
-            "pe": pe, "ane": ane, "classification": classification
-        })
-        df.to_csv(raw_path, index=False)
-    else:
-        df = pd.read_csv(raw_path)
+    os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+    df.to_csv(raw_path, index=False)
+    print(f"  CKD: {df.shape}  prevalence={df['classification'].mean():.1%}")
     return df
 
-# -------------------------------------------------------------
-# 2. Candidate Algorithm Benchmarking
-# -------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 2.  Calibrated Model Evaluation
+# ---------------------------------------------------------------------------
 
 def evaluate_models(X_train, y_train, X_test, y_test, preprocessor):
-    """Compares 5 standard classifiers using 5-fold Stratified CV."""
-    candidates = {
-        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
-        "Decision Tree": DecisionTreeClassifier(max_depth=5, random_state=42),
-        "Random Forest": RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42),
-        "Gradient Boosting": GradientBoostingClassifier(n_estimators=100, learning_rate=0.08, max_depth=4, random_state=42),
-        "Support Vector Machine": SVC(probability=True, random_state=42)
+    """
+    Trains each candidate wrapped in CalibratedClassifierCV so that
+    predict_proba() returns well-spread probabilities (no saturation).
+    """
+    raw_candidates = {
+        "Logistic Regression": LogisticRegression(
+            C=0.8, max_iter=2000, solver="lbfgs", random_state=42),
+        "Random Forest": RandomForestClassifier(
+            n_estimators=200, max_depth=7, min_samples_split=8, min_samples_leaf=4,
+            n_jobs=-1, random_state=42),
+        "Gradient Boosting": GradientBoostingClassifier(
+            n_estimators=120, learning_rate=0.08, max_depth=3,
+            subsample=0.8, random_state=42),
     }
-    
+
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     comparison = {}
-    best_name = None
-    best_f1 = -1
-    best_pipeline = None
+    best_name, best_score, best_pipeline = None, -1, None
 
-    for name, clf in candidates.items():
-        pipe = Pipeline(steps=[
+    for name, raw_clf in raw_candidates.items():
+        method = "sigmoid" if name == "Logistic Regression" else "isotonic"
+        calibrated = CalibratedClassifierCV(estimator=raw_clf, method=method, cv=3)
+
+        pipe = Pipeline([
             ("preprocessor", preprocessor),
-            ("classifier", clf)
+            ("classifier",   calibrated)
         ])
-        
         pipe.fit(X_train, y_train)
-        y_pred = pipe.predict(X_test)
-        y_proba = pipe.predict_proba(X_test)[:, 1] if hasattr(pipe, "predict_proba") else None
-        
-        acc = accuracy_score(y_test, y_pred)
+
+        y_pred  = pipe.predict(X_test)
+        y_proba = pipe.predict_proba(X_test)[:, 1]
+
+        acc  = accuracy_score(y_test, y_pred)
         prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        f1 = f1_score(y_test, y_pred, zero_division=0)
-        roc = roc_auc_score(y_test, y_proba) if y_proba is not None else 0.5
-        cm = confusion_matrix(y_test, y_pred).tolist()
-        
-        cv_scores = cross_val_score(pipe, X_train, y_train, cv=cv, scoring="accuracy")
-        
+        rec  = recall_score(y_test, y_pred, zero_division=0)
+        f1   = f1_score(y_test, y_pred, zero_division=0)
+        roc  = roc_auc_score(y_test, y_proba)
+        cm   = confusion_matrix(y_test, y_pred).tolist()
+        cv_s = cross_val_score(pipe, X_train, y_train, cv=cv, scoring="roc_auc", n_jobs=-1)
+
+        pmin, pmax, pstd = y_proba.min(), y_proba.max(), y_proba.std()
+
         comparison[name] = {
-            "accuracy": round(float(acc), 4),
-            "precision": round(float(prec), 4),
-            "recall": round(float(rec), 4),
-            "f1_score": round(float(f1), 4),
-            "roc_auc": round(float(roc), 4),
-            "cv_accuracy_mean": round(float(cv_scores.mean()), 4),
-            "confusion_matrix": cm
+            "accuracy":         round(float(acc),  4),
+            "precision":        round(float(prec), 4),
+            "recall":           round(float(rec),  4),
+            "f1_score":         round(float(f1),   4),
+            "roc_auc":          round(float(roc),  4),
+            "cv_accuracy_mean": round(float(cv_s.mean()), 4),
+            "cv_accuracy_std":  round(float(cv_s.std()),  4),
+            "confusion_matrix": cm,
         }
-        
-        # In medical prediction, balance recall and f1
-        if f1 > best_f1:
-            best_f1 = f1
-            best_name = name
-            best_pipeline = pipe
+        print(f"    [{name:25s}] Acc={acc:.4f} F1={f1:.4f} ROC={roc:.4f} "
+              f"P=[{pmin:.2f},{pmax:.2f}] std={pstd:.3f}")
+
+        score = roc * 0.60 + f1 * 0.25 + acc * 0.15
+        if score > best_score:
+            best_score, best_name, best_pipeline = score, name, pipe
 
     return best_name, best_pipeline, comparison
 
-# -------------------------------------------------------------
-# 3. Pipeline Builders per Disease
-# -------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 3.  Pipeline Builders
+# ---------------------------------------------------------------------------
 
 def build_diabetes_pipeline():
-    print("\n--- Training Diabetes Prediction Pipeline ---")
-    df = get_diabetes_data()
-    
-    # Preprocessing: Handle biologically impossible zeros
-    zero_cols = ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]
+    print("\n" + "-"*50)
+    print("  DIABETES Prediction Pipeline")
+    print("-"*50)
+
+    df       = get_diabetes_data()
     df_clean = df.copy()
-    for col in zero_cols:
+    for col in ["Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI"]:
         df_clean[col] = df_clean[col].replace(0, np.nan)
-        
     df_clean.to_csv(os.path.join(DATASETS_PROCESSED, "diabetes_clean.csv"), index=False)
-    
+
     feature_cols = [c for c in df.columns if c != "Outcome"]
-    X = df_clean[feature_cols]
-    y = df_clean["Outcome"].astype(int)
-    
+    X, y = df_clean[feature_cols], df_clean["Outcome"].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
-    
-    preprocessor = Pipeline(steps=[
+        X, y, test_size=0.20, stratify=y, random_state=42)
+
+    preprocessor = Pipeline([
         ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler())
+        ("scaler",  StandardScaler())
     ])
-    
-    best_name, best_pipe, comparison = evaluate_models(X_train, y_train, X_test, y_test, preprocessor)
-    print(f"Selected Best Diabetes Classifier: {best_name}")
-    print(f"Metrics: {comparison[best_name]}")
-    
-    # Save pipeline
-    pipeline_path = os.path.join(SAVED_MODELS_DIR, "diabetes_pipeline.joblib")
-    joblib.dump(best_pipe, pipeline_path)
-    
-    # Prepare background for SHAP
-    transformed_train = best_pipe.named_steps["preprocessor"].transform(X_train)
-    background_sample = transformed_train[:100]
-    
-    joblib.dump(background_sample, os.path.join(SAVED_MODELS_DIR, "diabetes_shap_background.joblib"))
-    joblib.dump(feature_cols, os.path.join(SAVED_MODELS_DIR, "diabetes_features.joblib"))
-    
+
+    best_name, best_pipe, comparison = evaluate_models(
+        X_train, y_train, X_test, y_test, preprocessor)
+    print(f"\n  Winner: {best_name}  Acc={comparison[best_name]['accuracy']}  "
+          f"ROC={comparison[best_name]['roc_auc']}")
+
+    tp = best_pipe.predict_proba(X_test)[:, 1]
+    print(f"  Calibration check -> range=[{tp.min():.3f}, {tp.max():.3f}]  std={tp.std():.3f}")
+
+    joblib.dump(best_pipe, os.path.join(SAVED_MODELS_DIR, "diabetes_pipeline.joblib"))
+    raw_pp = best_pipe.named_steps["preprocessor"]
+    tr = raw_pp.transform(X_train)
+    joblib.dump(tr[:200], os.path.join(SAVED_MODELS_DIR, "diabetes_shap_background.joblib"))
+    joblib.dump(list(feature_cols), os.path.join(SAVED_MODELS_DIR, "diabetes_features.joblib"))
+
     return {
-        "disease": "diabetes",
-        "best_algorithm": best_name,
-        "features": feature_cols,
-        "metrics": comparison[best_name],
-        "all_models": comparison
+        "disease": "diabetes", "best_algorithm": best_name,
+        "features": list(feature_cols),
+        "metrics": comparison[best_name], "all_models": comparison
     }
 
 
 def build_heart_pipeline():
-    print("\n--- Training Heart Disease Prediction Pipeline ---")
+    print("\n" + "-"*50)
+    print("  HEART DISEASE Prediction Pipeline")
+    print("-"*50)
+
     df = get_heart_data()
     df.to_csv(os.path.join(DATASETS_PROCESSED, "heart_clean.csv"), index=False)
-    
+
     feature_cols = [c for c in df.columns if c != "target"]
-    X = df[feature_cols]
-    y = df["target"].astype(int)
-    
+    X, y = df[feature_cols], df["target"].astype(int)
     num_cols = ["age", "trestbps", "chol", "thalach", "oldpeak"]
     cat_cols = ["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"]
-    
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
-    
-    preprocessor = ColumnTransformer(transformers=[
+        X, y, test_size=0.20, stratify=y, random_state=42)
+
+    preprocessor = ColumnTransformer([
         ("num", Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler())
+            ("i", SimpleImputer(strategy="median")),
+            ("s", StandardScaler())
         ]), num_cols),
         ("cat", Pipeline([
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-        ]), cat_cols)
+            ("i", SimpleImputer(strategy="most_frequent")),
+            ("e", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+        ]), cat_cols),
     ])
-    
-    best_name, best_pipe, comparison = evaluate_models(X_train, y_train, X_test, y_test, preprocessor)
-    print(f"Selected Best Heart Disease Classifier: {best_name}")
-    print(f"Metrics: {comparison[best_name]}")
-    
-    pipeline_path = os.path.join(SAVED_MODELS_DIR, "heart_pipeline.joblib")
-    joblib.dump(best_pipe, pipeline_path)
-    
-    # Save transformed background sample & feature names
-    preprocessor_fitted = best_pipe.named_steps["preprocessor"]
-    transformed_train = preprocessor_fitted.transform(X_train)
-    background_sample = transformed_train[:100]
-    
-    # Get feature names after one-hot encoding
-    cat_feature_names = preprocessor_fitted.named_transformers_["cat"].named_steps["encoder"].get_feature_names_out(cat_cols)
-    all_engineered_features = list(num_cols) + list(cat_feature_names)
-    
-    joblib.dump(background_sample, os.path.join(SAVED_MODELS_DIR, "heart_shap_background.joblib"))
-    joblib.dump(feature_cols, os.path.join(SAVED_MODELS_DIR, "heart_features.joblib"))
-    joblib.dump(all_engineered_features, os.path.join(SAVED_MODELS_DIR, "heart_engineered_features.joblib"))
-    
+
+    best_name, best_pipe, comparison = evaluate_models(
+        X_train, y_train, X_test, y_test, preprocessor)
+    print(f"\n  Winner: {best_name}  Acc={comparison[best_name]['accuracy']}  "
+          f"ROC={comparison[best_name]['roc_auc']}")
+
+    tp = best_pipe.predict_proba(X_test)[:, 1]
+    print(f"  Calibration check -> range=[{tp.min():.3f}, {tp.max():.3f}]  std={tp.std():.3f}")
+
+    joblib.dump(best_pipe, os.path.join(SAVED_MODELS_DIR, "heart_pipeline.joblib"))
+    pf  = best_pipe.named_steps["preprocessor"]
+    tr  = pf.transform(X_train)
+    cf  = pf.named_transformers_["cat"].named_steps["e"].get_feature_names_out(cat_cols)
+    eng = list(num_cols) + list(cf)
+    joblib.dump(tr[:200], os.path.join(SAVED_MODELS_DIR, "heart_shap_background.joblib"))
+    joblib.dump(list(feature_cols), os.path.join(SAVED_MODELS_DIR, "heart_features.joblib"))
+    joblib.dump(eng, os.path.join(SAVED_MODELS_DIR, "heart_engineered_features.joblib"))
+
     return {
-        "disease": "heart",
-        "best_algorithm": best_name,
-        "features": feature_cols,
-        "metrics": comparison[best_name],
-        "all_models": comparison
+        "disease": "heart", "best_algorithm": best_name,
+        "features": list(feature_cols),
+        "metrics": comparison[best_name], "all_models": comparison
     }
 
 
 def build_kidney_pipeline():
-    print("\n--- Training Chronic Kidney Disease Pipeline ---")
+    print("\n" + "-"*50)
+    print("  CHRONIC KIDNEY DISEASE Prediction Pipeline")
+    print("-"*50)
+
     df = get_kidney_data()
-    
-    # Clean string columns
-    df_clean = df.copy()
-    str_cols = df_clean.select_dtypes(include=["object"]).columns
-    for c in str_cols:
-        df_clean[c] = df_clean[c].astype(str).str.strip().str.lower()
-        
-    # Map target
-    df_clean["classification"] = df_clean["classification"].map({"ckd": 1, "notckd": 0}).fillna(1).astype(int)
-    df_clean.to_csv(os.path.join(DATASETS_PROCESSED, "kidney_clean.csv"), index=False)
-    
-    feature_cols = [c for c in df_clean.columns if c != "classification"]
-    X = df_clean[feature_cols]
-    y = df_clean["classification"]
-    
-    num_cols = ["age", "bp", "bgr", "bu", "sc", "sod", "pot", "hemo", "pcv", "wc", "rc"]
-    cat_cols = ["sg", "al", "su", "rbc", "pc", "pcc", "ba", "htn", "dm", "cad", "appet", "pe", "ane"]
-    
+    df.to_csv(os.path.join(DATASETS_PROCESSED, "kidney_clean.csv"), index=False)
+
+    feature_cols = [c for c in df.columns if c != "classification"]
+    X, y = df[feature_cols], df["classification"].astype(int)
+    num_cols = ["age", "bp", "sg", "al", "su", "bgr", "bu",
+                "sc", "sod", "pot", "hemo", "pcv", "wc", "rc"]
+    cat_cols = ["rbc", "pc", "pcc", "ba", "htn",
+                "dm", "cad", "appet", "pe", "ane"]
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
-    
-    preprocessor = ColumnTransformer(transformers=[
+        X, y, test_size=0.20, stratify=y, random_state=42)
+
+    preprocessor = ColumnTransformer([
         ("num", Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler())
+            ("i", SimpleImputer(strategy="median")),
+            ("s", StandardScaler())
         ]), num_cols),
         ("cat", Pipeline([
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-        ]), cat_cols)
+            ("i", SimpleImputer(strategy="most_frequent")),
+            ("e", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+        ]), cat_cols),
     ])
-    
-    best_name, best_pipe, comparison = evaluate_models(X_train, y_train, X_test, y_test, preprocessor)
-    print(f"Selected Best Kidney Disease Classifier: {best_name}")
-    print(f"Metrics: {comparison[best_name]}")
-    
-    pipeline_path = os.path.join(SAVED_MODELS_DIR, "kidney_pipeline.joblib")
-    joblib.dump(best_pipe, pipeline_path)
-    
-    preprocessor_fitted = best_pipe.named_steps["preprocessor"]
-    transformed_train = preprocessor_fitted.transform(X_train)
-    background_sample = transformed_train[:100]
-    
-    cat_feature_names = preprocessor_fitted.named_transformers_["cat"].named_steps["encoder"].get_feature_names_out(cat_cols)
-    all_engineered_features = list(num_cols) + list(cat_feature_names)
-    
-    joblib.dump(background_sample, os.path.join(SAVED_MODELS_DIR, "kidney_shap_background.joblib"))
-    joblib.dump(feature_cols, os.path.join(SAVED_MODELS_DIR, "kidney_features.joblib"))
-    joblib.dump(all_engineered_features, os.path.join(SAVED_MODELS_DIR, "kidney_engineered_features.joblib"))
-    
+
+    best_name, best_pipe, comparison = evaluate_models(
+        X_train, y_train, X_test, y_test, preprocessor)
+    print(f"\n  Winner: {best_name}  Acc={comparison[best_name]['accuracy']}  "
+          f"ROC={comparison[best_name]['roc_auc']}")
+
+    tp = best_pipe.predict_proba(X_test)[:, 1]
+    print(f"  Calibration check -> range=[{tp.min():.3f}, {tp.max():.3f}]  std={tp.std():.3f}")
+
+    joblib.dump(best_pipe, os.path.join(SAVED_MODELS_DIR, "kidney_pipeline.joblib"))
+    pf  = best_pipe.named_steps["preprocessor"]
+    tr  = pf.transform(X_train)
+    cf  = pf.named_transformers_["cat"].named_steps["e"].get_feature_names_out(cat_cols)
+    eng = list(num_cols) + list(cf)
+    joblib.dump(tr[:200], os.path.join(SAVED_MODELS_DIR, "kidney_shap_background.joblib"))
+    joblib.dump(list(feature_cols), os.path.join(SAVED_MODELS_DIR, "kidney_features.joblib"))
+    joblib.dump(eng, os.path.join(SAVED_MODELS_DIR, "kidney_engineered_features.joblib"))
+
     return {
-        "disease": "kidney",
-        "best_algorithm": best_name,
-        "features": feature_cols,
-        "metrics": comparison[best_name],
-        "all_models": comparison
+        "disease": "kidney", "best_algorithm": best_name,
+        "features": list(feature_cols),
+        "metrics": comparison[best_name], "all_models": comparison
     }
 
+
+# ---------------------------------------------------------------------------
+# 4.  Main
+# ---------------------------------------------------------------------------
 
 def main():
-    print("=====================================================")
-    print("Starting Early Disease Prediction ML Pipeline Training")
-    print("=====================================================")
-    
-    diabetes_meta = build_diabetes_pipeline()
-    heart_meta = build_heart_pipeline()
-    kidney_meta = build_kidney_pipeline()
-    
+    print("="*60)
+    print("  Early Disease Prediction - ML Training v3.0")
+    print(f"  Samples: {N_SAMPLES:,} per disease | Calibration: ON")
+    print("="*60)
+
+    dm = build_diabetes_pipeline()
+    hm = build_heart_pipeline()
+    km = build_kidney_pipeline()
+
     all_metrics = {
-        "version": "1.0.0",
-        "diabetes": diabetes_meta,
-        "heart": heart_meta,
-        "kidney": kidney_meta
+        "version":   "3.0.0",
+        "n_samples": N_SAMPLES,
+        "diabetes":  dm,
+        "heart":     hm,
+        "kidney":    km,
     }
-    
+
     metrics_path = os.path.join(SAVED_MODELS_DIR, "model_metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(all_metrics, f, indent=2)
-        
-    print(f"\nTraining completed successfully! Saved all pipelines and metrics to: {SAVED_MODELS_DIR}")
+
+    print("\n" + "="*60)
+    print("  ALL PIPELINES SAVED")
+    print(f"  Diabetes  -> {dm['best_algorithm']:25s} Acc={dm['metrics']['accuracy']:.4f} ROC={dm['metrics']['roc_auc']:.4f}")
+    print(f"  Heart     -> {hm['best_algorithm']:25s} Acc={hm['metrics']['accuracy']:.4f} ROC={hm['metrics']['roc_auc']:.4f}")
+    print(f"  Kidney    -> {km['best_algorithm']:25s} Acc={km['metrics']['accuracy']:.4f} ROC={km['metrics']['roc_auc']:.4f}")
+    print(f"  Output    -> {SAVED_MODELS_DIR}")
+    print("="*60)
+
 
 if __name__ == "__main__":
     main()

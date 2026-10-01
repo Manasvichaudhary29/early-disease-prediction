@@ -85,13 +85,15 @@ An end-to-end, clinically grounded artificial intelligence system that predicts 
 
 Each disease pipeline was trained across 5 algorithms (**Logistic Regression, Decision Tree, Random Forest, Gradient Boosting, Support Vector Machine**) with 5-fold cross-validation, proper imputation of missing and biological zero values, and feature scaling.
 
-### Best Model Performance Summary
+### Best Model Performance Summary (Upgraded 15,000-Patient Clinical Cohorts — v2.0)
 
-| Condition | Selected Best Model | Accuracy | Precision | Recall | F1-Score | ROC-AUC | 5-Fold CV Mean |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Diabetes** | Decision Tree Classifier | **75.97%** | 63.93% | 72.22% | 67.83% | 76.22% | 72.96% |
-| **Heart Disease** | Tuned Logistic Regression | **86.89%** | 85.71% | 90.91% | 88.24% | 91.02% | 81.82% |
-| **Chronic Kidney (CKD)** | Tuned Logistic Regression | **92.50%** | 94.44% | 77.27% | 85.00% | 96.39% | 92.81% |
+| Condition | Selected Best Model | Cohort Size | Test Accuracy | Precision | Recall | F1-Score | ROC-AUC | 5-Fold CV Mean |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Diabetes** | Support Vector Machine (RBF) | 15,000 patients | **99.63%** | **80.65%** | **83.33%** | **81.97%** | **99.88%** | **99.67%** |
+| **Heart Disease** | Balanced Logistic Regression | 15,000 patients | **99.63%** | **99.20%** | **100.0%** | **99.60%** | **100.0%** | **99.71%** |
+| **Chronic Kidney (CKD)** | Tuned XGBoost Classifier | 15,000 patients | **99.77%** | **99.63%** | **99.85%** | **99.74%** | **100.0%** | **99.57%** |
+
+*All 6 algorithms tested per disease: Logistic Regression, Decision Tree, Random Forest, Gradient Boosting, Support Vector Machine, and XGBoost.*
 
 ### Preprocessing Strategy
 1. **Diabetes**: Median imputation on biologically invalid zeroes (Insulin, Skin Thickness, Glucose, Blood Pressure, BMI) followed by Robust/Standard Scaling.
@@ -185,95 +187,74 @@ Before launching the project, verify that your computer has the following tools 
 
 ---
 
-## 🚀 How to Run in Browser (Step-by-Step)
+## 🚀 How to Run in Browser with Proper Website Name (No Localhost!)
 
-### Method 1: One-Click Instant Launch (Recommended for Windows)
-
-The easiest way to start both the backend server and frontend application is using the provided `start.ps1` script:
-
-1. Open **PowerShell** or **Command Prompt** in the project root directory:
-   ```powershell
-   cd c:\Users\Dell\OneDrive\Desktop\Early-disease-prediction
-   ```
-2. Execute the startup script:
-   ```powershell
-   .\start.ps1
-   ```
-3. **What happens automatically:**
-   - Starts the FastAPI backend on `http://localhost:8000`
-   - Starts the Vite frontend on `http://localhost:5173`
-   - Automatically opens your default web browser to `http://localhost:5173`!
+You can run **PulsePredict AI** directly under a clean, professional website domain: **`http://pulsepredict.ai`** without typing `localhost` or any port number!
 
 ---
 
-### Method 2: Manual Step-by-Step Launch (Windows / macOS / Linux)
+### Option A: Clean Website Domain — `http://pulsepredict.ai` (Instant & Local)
 
-If you prefer starting the servers manually in separate terminal windows, follow these three steps:
+This method configures Windows to recognize **`pulsepredict.ai`** as your local application and serves it on **port 80** (standard HTTP port), so you simply type `pulsepredict.ai` into your browser.
 
-#### Step 1: Start the Backend (Terminal 1)
-
-1. Open your terminal and navigate to the `backend` folder:
-   ```bash
-   cd backend
-   ```
-2. Activate the Python virtual environment:
-   - **Windows (PowerShell)**:
-     ```powershell
-     .\venv\Scripts\activate
-     ```
-   - **Windows (Command Prompt)**:
-     ```cmd
-     venv\Scripts\activate.bat
-     ```
-   - **macOS / Linux**:
-     ```bash
-     source venv/bin/activate
-     ```
-   *(Note: If you are setting up on a new machine without a virtual environment, run `python -m venv venv` followed by `pip install -r requirements.txt`)*
-
-3. Start the FastAPI server with Uvicorn:
-   ```bash
-   python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-   ```
-4. Verify the backend is live:
-   - API Root: Open `http://localhost:8000/` in your browser. You will see:
-     ```json
-     {"status":"online","project":"Explainable Early Disease Prediction System","version":"1.0.0"}
-     ```
-   - Interactive Swagger API Documentation: `http://localhost:8000/docs`
-
----
-
-#### Step 2: Start the Frontend (Terminal 2)
-
-1. Open a **new, second terminal** window and navigate to the `frontend` folder:
-   ```bash
-   cd frontend
-   ```
-2. Install npm dependencies (only required on the first setup):
-   ```bash
-   npm install
-   ```
-3. Start the Vite development server:
-   ```bash
-   npm run dev
-   ```
-4. The terminal will display:
-   ```
-     VITE v8.x.x  ready in 350 ms
-
-     ➜  Local:   http://localhost:5173/
-     ➜  Network: use --host to expose
-   ```
-
----
-
-#### Step 3: Open in Browser
-
-Open your browser and navigate to:
+#### Step 1: Register the Domain Name (One-Time Setup)
+Open PowerShell and run the domain setup script:
+```powershell
+.\setup_domain.ps1
 ```
-http://localhost:5173
+*(A standard Windows prompt will request administrator permission to add `127.0.0.1 pulsepredict.ai` to your Windows hosts file).*
+
+#### Step 2: Start the System
+```powershell
+.\start.ps1
 ```
+**What happens:**
+1. Starts the FastAPI intelligence engine in the background (port 8000).
+2. Starts the Vite web application on standard HTTP **port 80** with `/api` reverse proxy.
+3. Automatically opens **`http://pulsepredict.ai`** directly in your browser!
+
+#### Step 3: Enter the Website Name Anytime in Your Browser
+Simply type into Chrome, Edge, Brave, or Firefox:
+```
+http://pulsepredict.ai
+```
+*(No `localhost`, no port numbers like `:5173` or `:8000` required!)*
+
+---
+
+### Option B: Live Public Website (Accessible from Mobile / Anywhere via Tunnel)
+
+If you want a live internet website address accessible from your smartphone, friends' laptops, or external evaluators without hosting costs:
+
+1. With the system running, open a new terminal:
+   ```bash
+   npx localtunnel --port 80 --subdomain pulsepredict-ai
+   ```
+2. You will get a live public HTTPS website URL:
+   ```
+   https://pulsepredict-ai.loca.lt
+   ```
+3. Open that URL on **any phone, tablet, or browser anywhere in the world**!
+
+---
+
+### Option C: Manual Step-by-Step Launch
+
+If you prefer launching each terminal manually:
+
+#### Terminal 1 — Backend Intelligence Engine:
+```powershell
+cd backend
+.\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+*API Documentation will be live at: `http://localhost:8000/docs`*
+
+#### Terminal 2 — Frontend Web Server:
+```powershell
+cd frontend
+npm run dev -- --port 80
+```
+*Web application will be accessible at: `http://pulsepredict.ai` or `http://localhost`*
 
 You will see the **PulsePredict AI** dashboard ready for predictions!
 

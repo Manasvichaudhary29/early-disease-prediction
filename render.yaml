@@ -1,0 +1,40 @@
+# Render Blueprint Specification for PulsePredict AI
+# Free Tier Optimized: 1 Python Web Service (Backend) + 1 Free Static Site (Frontend)
+version: "1"
+
+services:
+  # 1. Backend Web Service (FastAPI)
+  - type: web
+    name: pulsepredict-backend
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:///./early_disease.db
+
+  # 2. Frontend Static Site (React + Vite)
+  - type: static
+    name: pulsepredict-frontend
+    region: oregon
+    plan: free
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        fromService:
+          type: web
+          name: pulsepredict-backend
+          property: host
