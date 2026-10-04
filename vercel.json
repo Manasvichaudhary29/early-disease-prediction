@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "pulsepredict-backend": {
+      "root": "backend",
+      "framework": "fastapi",
+      "buildCommand": "pip install --upgrade pip && pip install -r requirements.txt"
+    },
+    "pulsepredict-frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "buildCommand": "npm install && npm run build",
+      "outputDirectory": "dist"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "pulsepredict-backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "pulsepredict-frontend"
+      }
+    }
+  ]
+}
