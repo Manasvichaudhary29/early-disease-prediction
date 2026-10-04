@@ -4,7 +4,7 @@
     "pulsepredict-backend": {
       "root": "backend",
       "framework": "fastapi",
-      "buildCommand": "pip install --upgrade pip && pip install -r requirements.txt"
+      "buildCommand": "pip install --upgrade pip && pip install -r requirements-prod.txt"
     },
     "pulsepredict-frontend": {
       "root": "frontend",

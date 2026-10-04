@@ -1,0 +1,40 @@
+# Files/directories excluded from the Vercel deployment bundle.
+# Reducing bundle size is critical — Python deps already consume ~450 MB.
+
+# Training data — not needed at inference time
+datasets/
+
+# Local virtual environments
+.venv/
+venv/
+backend/venv/
+frontend/node_modules/
+
+# Python cache & compiled bytecode
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Development & test tooling
+backend/tests/
+backend/.pytest_cache/
+backend/train_models.py
+
+# Local SQLite database — production uses DATABASE_URL (PostgreSQL)
+backend/early_disease.db
+*.db
+
+# Build artifacts already excluded by default but listed for clarity
+frontend/dist/
+backend/.vercel/
+
+# Docker / Render config not needed on Vercel
+Dockerfile
+.dockerignore
+render.yaml
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
