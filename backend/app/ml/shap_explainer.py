@@ -1,9 +1,5 @@
 import numpy as np
-try:
-    import shap
-    HAS_SHAP = True
-except ImportError:
-    HAS_SHAP = False
+import shap
 from typing import List, Dict, Any
 
 CLINICAL_NAMES = {
@@ -74,8 +70,8 @@ def explain_prediction(
     factors = []
     
     try:
-        # Check if model has TreeExplainer support and shap is available
-        if HAS_SHAP and (hasattr(classifier, "estimators_") or hasattr(classifier, "tree_")):
+        # Check if model has TreeExplainer support
+        if hasattr(classifier, "estimators_") or hasattr(classifier, "tree_"):
             explainer = shap.TreeExplainer(classifier)
             shap_values = explainer.shap_values(transformed_input)
             
